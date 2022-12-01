@@ -148,7 +148,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable $MIS
 sudo systemctl start $MIS
 
-echo -e "\e[1m\e[31mSETUP FINISHED\e[0m"
+echo -e "\e[1m\e[31mSETUP COMPLETED\e[0m"
 echo ""
 echo -e "CHECK RUNNING LOGS : \e[1m\e[31mjournalctl -fu $MIS -o cat\e[0m"
 echo ""
