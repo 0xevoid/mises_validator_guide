@@ -48,65 +48,46 @@ echo ""
 sudo apt-get update && sudo apt-get upgrade -y
 
 # Package
-sudo apt-get install curl pkg-config libssl-dev liblz4-tool chrony bsdmainutils clang tar build-essential ncdu git wget jq make gcc rustc cargo tmux unzip -y
+sudo apt install jq lz4 build-essential -y
 
-# Install GO
-ver="1.18.2"
+# Get mainnet version of mises
 cd $HOME
-wget "https://golang.org/dl/go$ver.linux-amd64.tar.gz"
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf "go$ver.linux-amd64.tar.gz"
-rm "go$ver.linux-amd64.tar.gz"
-echo "export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin" >> ~/.bash_profile
-source ~/.bash_profile
-go version
+wget $MIS_REPO$MIS_VER/misestmd.linux-amd64.tar.gz
+tar -xvf misestmd.linux-amd64.tar.gz
+sudo mv build/$MIS /usr/bin/
+chmod +x /usr/bin/$MIS
+rm -f misestmd.linux-amd64.tar.gz
+rm -rf build
 
-# Get testnet version of mis
-cd $HOME
-git clone -b $MIS_VER $MIS_REPO
-cd mises-tm
-git checkout $MIS_VER
-make install
-mv $HOME/go/bin/$MIS /usr/bin/
+# Create Service
+sudo tee /etc/systemd/system/$MIS.service > /dev/null <<EOF
+[Unit]
+Description=$MIS
+After=network-online.target
+[Service]
+User=$USER
+ExecStart=$(which $MIS) start --home $HOME/$MIS_FOLDER
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+[Install]
+WantedBy=multi-user.target
+EOF
 
-
-
-
-# GenTx generation
-
-$MIS config chain-id $MIS_ID
-
-
-
-
+# Register service
+sudo systemctl daemon-reload
+sudo systemctl enable $MIS
 
 # Init generation
-
+$MIS config chain-id $MIS_ID
 $MIS init $MIS_NODENAME --chain-id $MIS_ID
 
-
-
-
-# Download genesis and addrbook
-
-cd $HOME
-
-curl -s $MIS_GENESIS | jq .result.genesis > ~/$MIS_FOLDER/config/genesis.json
-
-
-
-
 # Set Seeds And Peers
+PEERS=40a8318fa18fa9d900f4b0d967df7b1020689fa0@e1.mises.site:26656
+sed -i -e "s/^persistent_peers *=.*/persistent_peers = \"$PEERS\"/" $HOME/$MIS_FOLDER/config/config.toml
 
-#SEEDS=""
-
-PEERS="40889503320199c676570b417b132755d0414332@rpc.gw.mises.site:26656"
-
-#sed -i.default "s/^seeds *=.*/seeds = \"$SEEDS\"/;" $HOME/$MIS_FOLDER/config/config.toml
-
-sed -i.default "s/^persistent_peers *=.*/persistent_peers = \"$PEERS\"/;" $HOME/$MIS_FOLDER/config/config.toml
-
-
+# Create file genesis.json
+touch $HOME/$MIS_FOLDER/config/genesis.json
 
 # Set Config Gas
 sed -i -e "s/^minimum-gas-prices *=.*/minimum-gas-prices = \"0.000025$MIS_DENOM\"/" $HOME/$MIS_FOLDER/config/app.toml
@@ -124,33 +105,35 @@ sed -i -e "s/^pruning-keep-recent *=.*/pruning-keep-recent = \"$pruning_keep_rec
 sed -i -e "s/^pruning-keep-every *=.*/pruning-keep-every = \"$pruning_keep_every\"/" $HOME/$MIS_FOLDER/config/app.toml
 sed -i -e "s/^pruning-interval *=.*/pruning-interval = \"$pruning_interval\"/" $HOME/$MIS_FOLDER/config/app.toml
 
-# Create Service
-sudo tee /etc/systemd/system/$MIS.service > /dev/null <<EOF
-[Unit]
-Description=$MIS
-After=network.target
+# Set config snapshot
+sed -i -e "s/^snapshot-interval *=.*/snapshot-interval = \"1000\"/" $HOME/$MIS_FOLDER/config/app.toml
+sed -i -e "s/^snapshot-keep-recent *=.*/snapshot-keep-recent = \"2\"/" $HOME/$MIS_FOLDER/config/app.toml
 
-[Service]
-Type=simple
-User=$USER
-ExecStart=$(which $MIS) start
-Restart=on-abort
+# Enable state sync
+$MIS unsafe-reset-all
 
-[Install]
-WantedBy=multi-user.target
+SNAP_RPC="https://e1.mises.site:443"
 
-[Service]
-LimitNOFILE=65535
-EOF
+LATEST_HEIGHT=$(curl -s $SNAP_RPC/block | jq -r .result.block.header.height); \
+BLOCK_HEIGHT=$((LATEST_HEIGHT - 2000)); \
+TRUST_HASH=$(curl -s "$SNAP_RPC/block?height=$BLOCK_HEIGHT" | jq -r .result.block_id.hash)
 
-# Register And Start Service
-sudo systemctl daemon-reload
-sudo systemctl enable $MIS
+echo ""
+echo -e "\e[1m\e[31m[!]\e[0m HEIGHT : \e[1m\e[31m$LATEST_HEIGHT\e[0m BLOCK : \e[1m\e[31m$BLOCK_HEIGHT\e[0m HASH : \e[1m\e[31m$TRUST_HASH\e[0m"
+echo ""
+
+sed -i.bak -E "s|^(enable[[:space:]]+=[[:space:]]+).*$|\1true| ; \
+s|^(rpc_servers[[:space:]]+=[[:space:]]+).*$|\1\"$SNAP_RPC,$SNAP_RPC\"| ; \
+s|^(trust_height[[:space:]]+=[[:space:]]+).*$|\1$BLOCK_HEIGHT| ; \
+s|^(trust_hash[[:space:]]+=[[:space:]]+).*$|\1\"$TRUST_HASH\"|" $HOME/$MIS_FOLDER/config/config.toml
+
+# Start Service
 sudo systemctl start $MIS
 
-echo -e "\e[1m\e[31mSETUP COMPLETED\e[0m"
+echo -e "\e[1m\e[31m[!]\e[0m SETUP FINISHED"
+echo -e "\e[1m\e[31m[!]\e[0m STATE SYNC ESTIMATION CAN TAKE 15-30 MINS PLEASE WAITTING"
 echo ""
-echo -e "CHECK RUNNING LOGS : \e[1m\e[31mjournalctl -fu $MIS -o cat\e[0m"
+echo -e "\e[1m\e[31m[!]\e[0m CHECK RUNNING LOGS : \e[1m\e[31mjournalctl -fu $MIS -o cat\e[0m"
 echo ""
 
 # End
