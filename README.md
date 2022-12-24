@@ -42,10 +42,7 @@ wget https://raw.githubusercontent.com/0xevoid/mises_validator_guide/main/instal
 ```
 >Wait for the install process to finish
 
-# Snapshot TO SPEEDY YOUR SYNC
-```
-wget https://raw.githubusercontent.com/0xevoid/mises_validator_guide/main/sync.sh && chmod +x sync.sh && ./sync.sh
-```
+
 ### Useful Commands
 
    * Check sync node
